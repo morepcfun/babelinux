@@ -227,6 +227,7 @@
 
   <input type="file" id="nano-file-input" style="display: none;" accept=".txt, text/plain">
   <input type="file" id="pic-file-input" style="display: none;" accept="image/*">
+  <input type="file" id="media-file-input" style="display: none;" accept="audio/*,video/*">
   <audio id="audio-player"></audio>
 
   <script>
@@ -246,33 +247,22 @@
       connecting: "Connecting to network... OK\n",
       helpHint: "\nFor a list of available commands, type 'help'.\n\n",
       helpTitle: "AVAILABLE COMMANDS:",
-      lsDescription: "List files and folders",
-      cdDescription: "Change directory",
-      runDescription: "Run an app in a new tab",
-      playDescription: "Play a media file",
-      infoDescription: "Show file description",
       clearDescription: "Clear the screen",
-      editDescription: "Open code editor",
       dateDescription: "Show date and time",
-      whoamiDescription: "Show your username",
       historyDescription: "Show command history",
-      echoDescription: "Repeat a string of text",
       calcDescription: "Simple calculator",
-      notesDescription: "Notepad for the session",
       themeDescription: "Change the color theme",
       nanoDescription: "Open a simple text editor",
       picDescription: "Simple image editor",
       sayDescription: "Make the terminal speak",
       helpDescription: "Show this help message",
+      playDescription: "Play a local media file",
       tabTitle: "TAB COMMANDS:",
       newTabDescription: "New tab",
       closeTabDescription: "Close active tab",
       picMenu: "\n[1] Compress  [2] Resize  [3] Grayscale  [4] Sepia  |  [save] Save  [reset] Reset  [exit] Exit\n",
       picPromptQuality: "Quality (1-100): ",
       picPromptWidth: "New width (pixels): ",
-      cdError: "cd: No such file or directory:",
-      openingCodeEditor: "Opening code editor...\n",
-      codeEditorError: "Error: Code editor 'coder' not found in the file system.\n",
       runUsage: "Usage: run [appname]\n",
       openingApp: "Opening",
       appNotFound: "Error: The app",
@@ -282,19 +272,10 @@
       usePauseStop: "Use 'pause' or 'stop'.\n",
       filetypeNotSupported: "Error: The file type of",
       isNotSupported: "is not supported.\n",
-      mediaFileNotFound: "Error: The media file",
       resumingSound: "Resuming audio...\n",
       soundPaused: "Audio paused. Use 'play' to resume.\n",
       soundStopped: "Audio stopped.\n",
-      noDescription: "No description found for",
-      infoError: "Error: Could not read info for",
-      corsError: "(This may be due to CORS policy).\n",
-      infoUsage: "Usage: info [filename]\n",
       calculatorError: "Invalid expression. Only numbers and operators (+, -, *, /, (, )) are allowed.\n",
-      noteAdded: "Note added.\n",
-      noNotes: "No notes.\n",
-      notesCleared: "All notes have been cleared.\n",
-      notesUsage: "Usage: notes [add|list|clear]\n",
       colorChanged: "The color has been changed.\n",
       colorReset: "The color has been reset.\n",
       commandNotFound: "Command not found:",
@@ -307,14 +288,12 @@
     };
 
     const commandList = [
-      'pic', 'ls', 'dir', 'cd', 'edit', 'run', 'play', 'pause', 'stop', 'info',
-      'help', 'cls', 'clear', 'date', 'whoami', 'history', 'echo', 'calc',
-      'notes', 'theme', 'nano', 'secret', 'say'
+      'pic', 'play', 'pause', 'stop', 'help', 'cls', 'clear', 'date',
+      'history', 'calc', 'theme', 'nano', 'secret', 'say'
     ];
 
-    // This array is now largely redundant but kept for logic that might depend on it elsewhere.
     const commandsWithSpacing = [
-      'ls', 'dir', 'help', 'history', 'whoami', 'date', 'echo', 'calc', 'notes', 'info', 'say'
+      'help', 'history', 'date', 'calc', 'say'
     ];
 
     const terminalFrame = document.getElementById('terminal-frame');
@@ -325,6 +304,7 @@
     const nanoTextarea = document.getElementById('nano-textarea');
     const nanoFileInput = document.getElementById('nano-file-input');
     const picFileInput = document.getElementById('pic-file-input');
+    const mediaFileInput = document.getElementById('media-file-input');
 
     let tabs = [];
     let activeTabId = null;
@@ -343,19 +323,13 @@
 
     const introText = `
 ${text.helpTitle}
-ls, dir         - ${text.lsDescription}
-cd [folder]     - ${text.cdDescription}
-run [app]       - ${text.runDescription}
-play [file]     - ${text.playDescription}
-info [file]     - ${text.infoDescription}
+play            - ${text.playDescription}
+pause           - Pause playback
+stop            - Stop playback
 clear, cls      - ${text.clearDescription}
-edit            - ${text.editDescription}
 date            - ${text.dateDescription}
-whoami          - ${text.whoamiDescription}
 history         - ${text.historyDescription}
-echo [text]     - ${text.echoDescription}
 calc [...]      - ${text.calcDescription}
-notes [...]     - ${text.notesDescription}
 theme [color]   - ${text.themeDescription}
 nano [filename] - ${text.nanoDescription}
 pic             - ${text.picDescription}
@@ -383,75 +357,6 @@ Alt + X         - ${text.closeTabDescription}
       text: text.helpHint,
       delay: 15
     }, ];
-
-    const fileSystem = {
-      'type': 'folder',
-      'content': {
-        'games': {
-          'type': 'folder',
-          'content': {
-            '100laps': { type: 'file', url: 'https://morepcfun.github.io/100laps/' },
-            '8ballpool': { type: 'file', url: 'https://morepcfun.github.io/8ballpool/' },
-            'adventure': { type: 'file', url: 'https://morepcfun.github.io/adventure/' },
-            'ameliax': { type: 'file', url: 'https://morepcfun.github.io/ameliax/' },
-            'blackjack': { type: 'file', url: 'https://morepcfun.github.io/blackjack/' },
-            'championship': { type: 'file', url: 'https://morepcfun.github.io/championship/' },
-            'citybuilder': { type: 'file', url: 'https://morepcfun.github.io/citybuilder/' },
-            'ludo': { type: 'file', url: 'https://morepcfun.github.io/ludo/' },
-            'minigolf': { type: 'file', url: 'https://morepcfun.github.io/minigolf/' },
-            'shithead': { type: 'file', url: 'https://morepcfun.github.io/shithead/' },
-            'snake': { type: 'file', url: 'https://morepcfun.github.io/snake/' },
-            'tetris': { type: 'file', url: 'https://morepcfun.github.io/tetris/' },
-            'uno': { type: 'file', url: 'https://morepcfun.github.io/uno/' },
-            'yatzy': { type: 'file', url: 'https://morepcfun.github.io/yatzy/' },
-          }
-        },
-        'tools': {
-          'type': 'folder',
-          'content': {
-            'base64': { type: 'file', url: 'https://morepcfun.github.io/base64/' },
-            'coder': { type: 'file', url: 'https://morepcfun.github.io/coder/', alias: 'edit' },
-            'emojifinder': { type: 'file', url: 'https://morepcfun.github.io/emojicopier/' },
-            'image2ascii': { type: 'file', url: 'https://morepcfun.github.io/image2ascii/' },
-            'image2bas64': { type: 'file', url: 'https://morepcfun.github.io/image2base64/' },
-            'imaged': { type: 'file', url: 'https://morepcfun.github.io/imaged/' },
-            'secretchat': { type: 'file', url: 'https://morepcfun.github.io/secretchat/' },
-            'sprited': { type: 'file', url: 'https://morepcfun.github.io/sprited/' },
-            'videoplayer': { type: 'file', url: 'https://morepcfun.github.io/videoplayer/' },
-            'webnotes': { type: 'file', url: 'https://morepcfun.github.io/webnotes/' },
-          }
-        },
-        'audio': {
-          'type': 'folder',
-          'content': {
-            '9hrain.mp3': { type: 'file', url: 'https://www.chromebooker.com/audio/9hrain.mp3' },
-            'homodeus.mp3': { type: 'file', url: 'https://www.chromebooker.com/audio/homodeus.mp3' },
-            'sapiens.mp3': { type: 'file', url: 'https://www.chromebooker.com/audio/sapiens.mp3' },
-          }
-        },
-        'videos': {
-          'type': 'folder',
-          'content': {
-            'movies': {
-              'type': 'folder',
-              'content': {
-                'barbarella.mp4': { type: 'file', url: 'https://www.chromebooker.com/movies/barbarella.mp4' },
-                'forbiddenworld.mp4': { type: 'file', url: 'https://www.chromebooker.com/movies/forbiddenworld.mp4' },
-                'galaxyofterror.mp4': { type: 'file', url: 'https://www.chromebooker.com/movies/galaxyofterror.mp4' },
-                'lifeforce.mp4': { type: 'file', url: 'https://www.chromebooker.com/movies/lifeforce.mp4' },
-                'silenthill.mp4': { type: 'file', url: 'https://www.chromebooker.com/movies/silenthill.mp4' },
-              }
-            },
-            'spicy': {
-              'type': 'folder',
-              'content': {
-                'clip.mp4': { type: 'file', url: 'https://www.aigirl.blog/clips/clip.mp4' },
-              }
-            }
-          }
-        },
-      }
-    };
 
     function initAudio() {
       if (!audioCtx) {
@@ -510,52 +415,6 @@ Alt + X         - ${text.closeTabDescription}
       noise.stop(audioCtx.currentTime + 0.15);
     }
 
-    function getNodeFromPath(path) {
-      let currentNode = fileSystem;
-      for (const part of path) {
-        if (currentNode.type === 'folder' && currentNode.content[part]) {
-          currentNode = currentNode.content[part];
-        } else {
-          return null;
-        }
-      }
-      return currentNode;
-    }
-
-    function findFileOrAlias(name, path) {
-      const currentNode = getNodeFromPath(path);
-      if (!currentNode || currentNode.type !== 'folder') return null;
-      if (currentNode.content[name]) {
-        return currentNode.content[name];
-      }
-      for (const key in currentNode.content) {
-        const item = currentNode.content[key];
-        if (item.type === 'file' && item.alias === name) {
-          return item;
-        }
-      }
-      return null;
-    }
-
-    function showFiles(tab) {
-      const currentNode = getNodeFromPath(tab.currentPath);
-      if (!currentNode || currentNode.type !== 'folder') return;
-      const listContainer = document.createElement('div');
-      listContainer.id = 'file-list';
-      Object.keys(currentNode.content).forEach(name => {
-        const item = currentNode.content[name];
-        const elementSpan = document.createElement('span');
-        if (item.type === 'folder') {
-          elementSpan.className = 'folder';
-          elementSpan.textContent = `[${name}]`;
-        } else {
-          elementSpan.textContent = name;
-        }
-        listContainer.appendChild(elementSpan);
-      });
-      tab.terminalElement.appendChild(listContainer);
-    }
-
     function createNewTab() {
       if (tabs.length >= config.maxTabs) return;
       const tabId = `tab-${nextTabId++}`;
@@ -588,9 +447,7 @@ Alt + X         - ${text.closeTabDescription}
         historyIndex: -1,
         currentCommand: '',
         isProcessing: false,
-        currentPath: [],
         videoElement: null,
-        notes: []
       };
       tabs.push(newTab);
       document.getElementById('tab-group').appendChild(tabEl);
@@ -685,8 +542,7 @@ Alt + X         - ${text.closeTabDescription}
       } else if (isPicMode) {
         promptText = `pic>`;
       } else {
-        const pathString = '~/' + tab.currentPath.join('/');
-        promptText = `${username}@${config.hostname}:${pathString}$`;
+        promptText = `${username}@${config.hostname}:~$`;
       }
       promptLine.innerHTML = `<span>${promptText} </span><span class="active-command-text"></span><span class="cursor"></span>`;
       tab.terminalElement.appendChild(promptLine);
@@ -779,7 +635,7 @@ Alt + X         - ${text.closeTabDescription}
       picFileInput.onchange = (e) => {
         const file = e.target.files[0];
         if (!file) {
-          // FIX: If the user cancels the file dialog, immediately return to the main prompt.
+          // This path is for when the user selects and cancels a file quickly, though unreliable.
           createPrompt(tab);
           return;
         }
@@ -793,7 +649,15 @@ Alt + X         - ${text.closeTabDescription}
         reader.readAsDataURL(file);
         e.target.value = '';
       };
-      picFileInput.click();
+
+      // FIX: Use setTimeout to ensure the prompt is restored if the dialog is canceled.
+      setTimeout(() => { picFileInput.click(); }, 100);
+      setTimeout(() => {
+        // If no file was selected after 200ms, assume cancellation and restore prompt
+        if (!picFileInput.files.length && !isPicMode) {
+            createPrompt(tab);
+        }
+      }, 200);
     }
 
     function showImageAndMenu(tab, imageData) {
@@ -855,8 +719,8 @@ Alt + X         - ${text.closeTabDescription}
     async function handlePicSubCommand(input, tab) {
       const promptLines = tab.terminalElement.querySelectorAll('.prompt-line:last-child');
       const promptLine = promptLines[0];
-      const promptText = promptLine.querySelector('span:first-child').textContent;
       if (promptLine) {
+        const promptText = promptLine.querySelector('span:first-child').textContent;
         promptLine.innerHTML = `<span>${promptText}</span><span>${input}</span>\n`;
       }
       const action = picNextAction;
@@ -924,14 +788,78 @@ Alt + X         - ${text.closeTabDescription}
       createPrompt(tab);
     }
 
+    function startPlayMode(tab) {
+      mediaFileInput.onchange = (e) => {
+        const file = e.target.files[0];
+        if (!file) {
+          // This path is for when the user selects and cancels a file quickly, though unreliable.
+          createPrompt(tab);
+          return;
+        }
+
+        const output = (text) => {
+          tab.terminalElement.innerHTML += text;
+        };
+
+        // Prepend a blank line before media start info
+        output('\n');
+
+        // Check for common media types
+        if (file.type.startsWith('audio/')) {
+          audioPlayer.src = URL.createObjectURL(file);
+          audioPlayer.play();
+          output(`${text.playingSound} ${file.name}. ${text.usePauseStop}\n`);
+        } else if (file.type.startsWith('video/')) {
+          if (tab.videoElement) tab.videoElement.remove();
+          output(`${text.nowPlaying} ${file.name}\n`);
+
+          const videoEl = document.createElement('video');
+          videoEl.className = 'terminal-video';
+          videoEl.src = URL.createObjectURL(file);
+          videoEl.controls = true;
+          videoEl.autoplay = true;
+
+          const refocusTerminal = () => {
+            tab.terminalElement.focus();
+          };
+          videoEl.onended = () => {
+            tab.videoElement = null;
+            refocusTerminal();
+          };
+          videoEl.addEventListener('fullscreenchange', () => {
+            if (!document.fullscreenElement) {
+              refocusTerminal();
+            }
+          });
+
+          tab.terminalElement.appendChild(videoEl);
+          tab.videoElement = videoEl;
+
+        } else {
+          output(`${text.filetypeNotSupported} '${file.name}' ${text.isNotSupported}`);
+        }
+        e.target.value = '';
+        output('\n'); // Append a blank line before the prompt
+        createPrompt(tab);
+      };
+
+      // FIX: Use setTimeout to ensure the prompt is restored if the dialog is canceled.
+      setTimeout(() => { mediaFileInput.click(); }, 100);
+      setTimeout(() => {
+        // If no file was selected after 200ms, assume cancellation and restore prompt
+        if (!mediaFileInput.files.length) {
+            createPrompt(tab);
+        }
+      }, 200);
+    }
+
 
     async function handleCommand(tab, command, internalCall = false) {
       if (!internalCall) {
         const promptLines = tab.terminalElement.querySelectorAll('.prompt-line:last-child');
         const promptLine = promptLines[0];
         if (promptLine) {
-          let pathString = '~/' + tab.currentPath.join('/');
-          promptLine.innerHTML = `<span>${username}@${config.hostname}:${pathString}$ </span><span>${command}</span>\n`;
+          promptLine.innerHTML = `<span>${username}@${config.hostname}:~$ </span><span>${command}</span>\n`;
         }
       }
       const [cmd, ...args] = command.trim().split(' ').filter(Boolean);
@@ -944,15 +872,15 @@ Alt + X         - ${text.closeTabDescription}
         tab.terminalElement.innerHTML += text;
       };
 
-      // FIX: Prepend a blank line for all command outputs for readability
+      // Prepend a blank line for all command outputs for readability
       output('\n');
 
       if (cmd === "secret") {
         output(text.secretResponse);
-        // Special case: secret response doesn't need an extra blank line before the prompt
         createPrompt(tab);
         return;
       }
+
       switch (cmd.toLowerCase()) {
         case 'say':
           if (!arg) {
@@ -969,122 +897,25 @@ Alt + X         - ${text.closeTabDescription}
         case 'pic':
           startPicMode(tab);
           return;
-        case 'ls':
-        case 'dir':
-          showFiles(tab);
-          break;
-        case 'cd':
-          if (!arg || arg === '~') {
-            tab.currentPath = [];
-          } else if (arg === '..' || arg === 'cd..') {
-            tab.currentPath.pop();
-          } else {
-            const pathArg = arg.endsWith('/') ? arg.slice(0, -1) : arg;
-            const target = getNodeFromPath([...tab.currentPath, pathArg]);
-            if (target && target.type === 'folder') {
-              tab.currentPath.push(pathArg);
-            } else {
-              output(`${text.cdError} ${arg}\n`);
-            }
-          }
-          break;
-        case 'edit':
-          const coderTool = fileSystem.content.tools.content.coder;
-          if (coderTool && coderTool.url) {
-            output(text.openingCodeEditor);
-            window.open(coderTool.url, '_blank');
-          } else {
-            output(text.codeEditorError);
-          }
-          break;
-        case 'run':
-          if (!arg) {
-            output(text.runUsage);
-            break;
-          }
-          const fileToRun = findFileOrAlias(arg, tab.currentPath);
-          if (fileToRun && fileToRun.url) {
-            output(`${text.openingApp} ${arg}...\n`);
-            window.open(fileToRun.url, '_blank');
-          } else {
-            output(`${text.appNotFound} '${arg}' ${text.wasNotFound}`);
-          }
-          break;
         case 'play':
-          const fileToPlay = findFileOrAlias(arg, tab.currentPath);
-          if (fileToPlay && fileToPlay.url) {
-            const url = fileToPlay.url;
-            if (url.endsWith('.mp4') || url.endsWith('.mkv')) {
-              if (tab.videoElement) tab.videoElement.remove();
-              output(`${text.nowPlaying} ${arg}\n`);
-              const videoEl = document.createElement('video');
-              videoEl.className = 'terminal-video';
-              videoEl.src = url;
-              videoEl.controls = true;
-              videoEl.autoplay = true;
-              const refocusTerminal = () => {
-                tab.terminalElement.focus();
-              };
-              videoEl.addEventListener('play', () => {
-                const lastPrompt = tab.terminalElement.querySelector('.prompt-line:last-child');
-                if (lastPrompt) lastPrompt.scrollIntoView();
-              });
-              videoEl.onended = () => {
-                tab.videoElement = null;
-                refocusTerminal();
-              };
-              videoEl.addEventListener('fullscreenchange', () => {
-                if (!document.fullscreenElement) {
-                  refocusTerminal();
-                }
-              });
-              tab.terminalElement.appendChild(videoEl);
-              tab.videoElement = videoEl;
-            } else if (url.endsWith('.mp3') || url.endsWith('.wav') || url.endsWith('.ogg')) {
-              audioPlayer.src = url;
-              audioPlayer.play();
-              output(`${text.playingSound} ${arg}. ${text.usePauseStop}`);
-            } else {
-              output(`${text.filetypeNotSupported} '${arg}' ${text.isNotSupported}`);
-            }
-          } else if (arg) {
-            output(`${text.mediaFileNotFound} '${arg}' ${text.wasNotFound}`);
-          } else {
-            if (audioPlayer.src && audioPlayer.paused) {
-              audioPlayer.play();
-              output(text.resumingSound);
-            } else {
-              output("Usage: play [mediafile]\n");
-            }
-          }
-          break;
+          startPlayMode(tab);
+          return;
         case 'pause':
           if (!audioPlayer.paused && audioPlayer.src) {
             audioPlayer.pause();
             output(text.soundPaused);
+          } else {
+            output("No media currently playing.\n");
           }
           break;
         case 'stop':
-          if (audioPlayer.src && !audioPlayer.paused) {
+          if (audioPlayer.src) {
             audioPlayer.pause();
             audioPlayer.currentTime = 0;
+            audioPlayer.removeAttribute('src'); // Clear source
             output(text.soundStopped);
-          }
-          break;
-        case 'info':
-          const fileForInfo = findFileOrAlias(arg, tab.currentPath);
-          if (fileForInfo && fileForInfo.url) {
-            try {
-              const response = await fetch(fileForInfo.url);
-              if (!response.ok) throw new Error('File not found at URL');
-              const htmlText = await response.text();
-              const match = htmlText.match(/<meta\s+name="description"\s+content="(.*?)"/i);
-              output(match && match[1] ? `${arg}:\n  ${match[1]}\n` : `${text.noDescription} ${arg}.\n`);
-            } catch (error) {
-              output(`${text.infoError} '${arg}'. ${text.corsError}`);
-            }
           } else {
-            output(arg ? `${text.mediaFileNotFound} '${arg}' ${text.wasNotFound}` : text.infoUsage);
+            output("No media currently playing.\n");
           }
           break;
         case 'help':
@@ -1104,16 +935,10 @@ Alt + X         - ${text.closeTabDescription}
         case 'date':
           output(new Date().toLocaleString('en-US'));
           break;
-        case 'whoami':
-          output(username);
-          break;
         case 'history':
           tab.commandHistory.forEach((item, index) => {
             output(` ${index + 1} ${item}\n`);
           });
-          break;
-        case 'echo':
-          output(arg);
           break;
         case 'calc':
           const safeExpression = /^[0-9\s\+\-\*\/\(\)\.]+$/;
@@ -1125,27 +950,6 @@ Alt + X         - ${text.closeTabDescription}
             }
           } else {
             output(text.calculatorError);
-          }
-          break;
-        case 'notes':
-          const subCmd = args[0];
-          const noteText = args.slice(1).join(' ');
-          if (subCmd === 'add') {
-            tab.notes.push(noteText);
-            output(text.noteAdded);
-          } else if (subCmd === 'list') {
-            if (tab.notes.length === 0) {
-              output(text.noNotes);
-            } else {
-              tab.notes.forEach((note, index) => {
-                output(`${index + 1}: ${note}\n`);
-              });
-            }
-          } else if (subCmd === 'clear') {
-            tab.notes = [];
-            output(text.notesCleared);
-          } else {
-            output(text.notesUsage);
           }
           break;
         case 'theme':
@@ -1165,12 +969,11 @@ Alt + X         - ${text.closeTabDescription}
           break;
       }
 
-      // FIX: Append a blank line before the prompt for all commands (except those that return early)
+      // Append a blank line before the prompt for all commands (except those that return early/clear the screen)
       output('\n');
       createPrompt(tab);
     }
 
-    // FIX: Made keydown handler async and awaited startBootSequence
     document.body.addEventListener('keydown', async (e) => {
       if (isNanoMode) return;
       if (e.altKey) {
@@ -1191,7 +994,7 @@ Alt + X         - ${text.closeTabDescription}
           username = username.trim() || config.defaultUsername;
           awaitingUsername = false;
           initAudio();
-          await startBootSequence(); // AWAIT to block further input until boot is done
+          await startBootSequence();
         } else if (e.key === 'Backspace') {
           username = username.slice(0, -1);
           if (usernamePromptText) usernamePromptText.textContent = username;
@@ -1213,7 +1016,6 @@ Alt + X         - ${text.closeTabDescription}
           if (tab.currentCommand.trim() && !isPicMode && !picNextAction) {
             tab.commandHistory.push(tab.currentCommand);
           }
-          // FIX: Always reset history index to the "new command" slot
           tab.historyIndex = tab.commandHistory.length;
 
           tab.isProcessing = true;
@@ -1238,7 +1040,6 @@ Alt + X         - ${text.closeTabDescription}
             commandTextEl.textContent = tab.currentCommand;
           }
         } else if (e.key === 'ArrowDown' && !isPicMode) {
-          // FIX: Correctly handle ArrowDown at the end of history
           if (tab.historyIndex < tab.commandHistory.length) {
             tab.historyIndex++;
             if (tab.historyIndex < tab.commandHistory.length) {
@@ -1266,30 +1067,7 @@ Alt + X         - ${text.closeTabDescription}
               tab.terminalElement.scrollTop = tab.terminalElement.scrollHeight;
             }
           } else if (parts.length >= 2) {
-            const command = parts[0].toLowerCase();
-            const argumentFragment = parts[parts.length - 1];
-            const currentNode = getNodeFromPath(tab.currentPath);
-            if (!currentNode) return;
-            let possibleMatches = [];
-            if (command === 'cd') {
-              possibleMatches = Object.keys(currentNode.content).filter(key => currentNode.content[key].type === 'folder');
-            } else if (['run', 'play', 'info', 'nano'].includes(command)) {
-              possibleMatches = Object.keys(currentNode.content);
-            }
-            const matches = possibleMatches.filter(item => item.startsWith(argumentFragment));
-            if (matches.length === 1) {
-              const completed = matches[0];
-              parts[parts.length - 1] = currentNode.content[completed].type === 'folder' ? completed + '/' : completed + ' ';
-              tab.currentCommand = parts.join(' ');
-              commandTextEl.textContent = tab.currentCommand;
-            } else if (matches.length > 1) {
-              const activePromptLine = commandTextEl.parentElement;
-              const suggestionsDiv = document.createElement('div');
-              suggestionsDiv.textContent = matches.join('    ');
-              suggestionsDiv.style.cssText = 'padding-left: 15px; padding-top: 5px; padding-bottom: 5px;';
-              tab.terminalElement.insertBefore(suggestionsDiv, activePromptLine);
-              tab.terminalElement.scrollTop = tab.terminalElement.scrollHeight;
-            }
+            // No file/folder tab completion anymore.
           }
         } else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
           tab.currentCommand += e.key;
@@ -1338,7 +1116,6 @@ Alt + X         - ${text.closeTabDescription}
     function init() {
       createNewTab();
       const firstTab = getActiveTab();
-      // Restoring the initial display for username prompt (now without ASCII art)
       firstTab.terminalElement.innerHTML = `<h1>BabeLinux 6.9</h1><div class="prompt-line"><span>${text.welcome} </span><span id="username-prompt-text"></span><span class="cursor"></span></div>\n`;
       firstTab.isProcessing = false;
       firstTab.terminalElement.focus();
