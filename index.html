@@ -471,9 +471,23 @@ Alt + X         - ${text.closeTabDescription}
       const wasActive = activeTabId === tabId;
       const tabToClose = tabs[tabIndex];
 
+      // Clean up any active video element and its blob URL
+      if (tabToClose.videoElement) {
+          const videoSrc = tabToClose.videoElement.src;
+          if (videoSrc && videoSrc.startsWith('blob:')) {
+              URL.revokeObjectURL(videoSrc);
+          }
+          tabToClose.videoElement.remove();
+      }
+
       // RELEASE AUDIO CONTROL if this tab owns it
       if (tabToClose.id === currentAudioTabId) {
         audioPlayer.pause();
+        // Revoke audio blob URL before removing attribute
+        const audioSrc = audioPlayer.src;
+        if (audioSrc && audioSrc.startsWith('blob:')) {
+            URL.revokeObjectURL(audioSrc);
+        }
         audioPlayer.removeAttribute('src');
         currentAudioTabId = null;
       }
@@ -550,7 +564,6 @@ Alt + X         - ${text.closeTabDescription}
 
       const promptLine = document.createElement('div');
       promptLine.className = 'prompt-line';
-      // Use a unique ID for the prompt line for reliable scrolling
       const uniqueId = `prompt-line-${Date.now()}`;
       promptLine.id = uniqueId;
 
@@ -571,18 +584,14 @@ Alt + X         - ${text.closeTabDescription}
     }
 
     function refocusTerminal(tab) {
-        // Find the most recent prompt-line
-        const lastPrompt = tab.terminalElement.querySelector('.prompt-line:last-child');
-        if (lastPrompt) {
-            // Ensure the cursor is placed on the active command line
-            const cursor = lastPrompt.querySelector('.cursor');
-            if (!cursor) {
-                lastPrompt.innerHTML += `<span class="cursor"></span>`;
-            }
-            // Use scrollIntoView for guaranteed focus
-            lastPrompt.scrollIntoView({ behavior: 'smooth', block: 'end' });
-        }
+      // This is the definitive "make the terminal the boss" function.
+      // It uses requestAnimationFrame to avoid timing issues after disruptive
+      // events like starting a video or exiting fullscreen.
+      requestAnimationFrame(() => {
         tab.terminalElement.focus();
+        // A forceful scroll to the bottom is more reliable than scrollIntoView.
+        tab.terminalElement.scrollTop = tab.terminalElement.scrollHeight;
+      });
     }
 
 
@@ -835,24 +844,32 @@ Alt + X         - ${text.closeTabDescription}
           tab.terminalElement.innerHTML += text;
         };
 
-        // Prepend a blank line before media start info
         output('\n');
 
-        // RELEASE AUDIO CONTROL from any other tab
         if (currentAudioTabId && currentAudioTabId !== tab.id) {
             const oldTab = tabs.find(t => t.id === currentAudioTabId);
             if(oldTab) oldTab.hasAudioControl = false;
         }
         currentAudioTabId = tab.id;
 
-        // Check for common media types
+        const oldAudioSrc = audioPlayer.src;
+        if (oldAudioSrc && oldAudioSrc.startsWith('blob:')) {
+            URL.revokeObjectURL(oldAudioSrc);
+        }
+
         if (file.type.startsWith('audio/')) {
           audioPlayer.src = URL.createObjectURL(file);
           audioPlayer.play();
-          tab.hasAudioControl = true; // Take control
+          tab.hasAudioControl = true;
           output(`${text.playingSound} ${file.name}. ${text.usePauseStop}\n`);
         } else if (file.type.startsWith('video/')) {
-          if (tab.videoElement) tab.videoElement.remove();
+          if (tab.videoElement) {
+              const oldVideoSrc = tab.videoElement.src;
+              if (oldVideoSrc && oldVideoSrc.startsWith('blob:')) {
+                  URL.revokeObjectURL(oldVideoSrc);
+              }
+              tab.videoElement.remove();
+          }
           output(`${text.nowPlaying} ${file.name}\n`);
 
           const videoEl = document.createElement('video');
@@ -860,10 +877,15 @@ Alt + X         - ${text.closeTabDescription}
           videoEl.src = URL.createObjectURL(file);
           videoEl.controls = true;
           videoEl.autoplay = true;
+          videoEl.tabIndex = -1; // Keep this to prevent focus stealing.
 
           const refocusTerminalCallback = () => { refocusTerminal(tab); };
 
           videoEl.onended = () => {
+            if (videoEl.src && videoEl.src.startsWith('blob:')) {
+                URL.revokeObjectURL(videoEl.src);
+            }
+            videoEl.remove();
             tab.videoElement = null;
             refocusTerminalCallback();
           };
@@ -880,18 +902,14 @@ Alt + X         - ${text.closeTabDescription}
           output(`${text.filetypeNotSupported} '${file.name}' ${text.isNotSupported}`);
         }
         e.target.value = '';
-        output('\n'); // Append a blank line before the prompt
+        output('\n');
 
-        const newPrompt = createPrompt(tab); // Create the new prompt element
+        createPrompt(tab);
 
-        // FIX: Use scrollIntoView on the *new* prompt element for guaranteed scroll
-        setTimeout(() => {
-            newPrompt.scrollIntoView({ behavior: 'smooth', block: 'end' });
-            tab.terminalElement.focus();
-        }, 0);
+        // Call our new, robust function to ensure focus and scroll are correct.
+        refocusTerminal(tab);
       };
 
-      // Ensure prompt is restored on cancellation
       mediaFileInput.value = '';
       setTimeout(() => { mediaFileInput.click(); }, 100);
       setTimeout(() => {
@@ -978,6 +996,10 @@ Alt + X         - ${text.closeTabDescription}
           if (audioPlayer.src) {
             audioPlayer.pause();
             audioPlayer.currentTime = 0;
+            // Revoke audio blob URL on stop
+            if (audioPlayer.src.startsWith('blob:')) {
+                URL.revokeObjectURL(audioPlayer.src);
+            }
             audioPlayer.removeAttribute('src');
             tab.hasAudioControl = false;
             currentAudioTabId = null; // Release control
@@ -992,12 +1014,15 @@ Alt + X         - ${text.closeTabDescription}
         case 'cls':
         case 'clear':
           playClearSound();
-          tab.terminalElement.innerHTML = '';
+           // Clean up video blob URL before clearing the DOM
           if (tab.videoElement) {
-            tab.videoElement.remove();
-            tab.videoElement = null;
+              const videoSrc = tab.videoElement.src;
+              if (videoSrc && videoSrc.startsWith('blob:')) {
+                  URL.revokeObjectURL(videoSrc);
+              }
+              tab.videoElement = null;
           }
-          // clear/cls does not use the standard footer
+          tab.terminalElement.innerHTML = '';
           createPrompt(tab);
           return;
         case 'date':
