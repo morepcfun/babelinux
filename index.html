@@ -275,6 +275,7 @@
       resumingSound: "Resuming audio...\n",
       soundPaused: "Audio paused. Use 'play' to resume.\n",
       soundStopped: "Audio stopped.\n",
+      audioControlError: "Error: This tab does not have control of the audio player.\n", // NEW
       calculatorError: "Invalid expression. Only numbers and operators (+, -, *, /, (, )) are allowed.\n",
       colorChanged: "The color has been changed.\n",
       colorReset: "The color has been reset.\n",
@@ -312,10 +313,9 @@
     let audioCtx;
     let username = '';
     let awaitingUsername = true;
-    let isNanoMode = false; // Still global as nano takes over the whole screen
-    let nanoFilename = ''; // Still global for nano filename
-
-    // REMOVED GLOBAL PIC MODE VARIABLES, NOW STORED IN TAB OBJECT
+    let isNanoMode = false; // Nano is globally modal (takes over screen)
+    let nanoFilename = '';
+    let currentAudioTabId = null; // NEW: Tracks which tab owns the audio player
 
     const delay = ms => new Promise(res => setTimeout(res, ms));
 
@@ -446,11 +446,13 @@ Alt + X         - ${text.closeTabDescription}
         currentCommand: '',
         isProcessing: false,
         videoElement: null,
-        // NEW: ISOLATED PIC MODE VARIABLES
+        // ISOLATED PIC MODE VARIABLES
         isPicMode: false,
         picOriginalImageData: null,
         picActiveImageData: null,
-        picNextAction: null
+        picNextAction: null,
+        // NEW: AUDIO CONTROL STATE
+        hasAudioControl: false
       };
       tabs.push(newTab);
       document.getElementById('tab-group').appendChild(tabEl);
@@ -471,6 +473,14 @@ Alt + X         - ${text.closeTabDescription}
       if (tabIndex === -1) return;
       const wasActive = activeTabId === tabId;
       const tabToClose = tabs[tabIndex];
+
+      // RELEASE AUDIO CONTROL if this tab owns it
+      if (tabToClose.id === currentAudioTabId) {
+        audioPlayer.pause();
+        audioPlayer.removeAttribute('src');
+        currentAudioTabId = null;
+      }
+
       tabToClose.tabElement.remove();
       tabToClose.terminalElement.remove();
       tabs.splice(tabIndex, 1);
@@ -540,7 +550,6 @@ Alt + X         - ${text.closeTabDescription}
       const promptLine = document.createElement('div');
       promptLine.className = 'prompt-line';
       let promptText;
-      // Access isPicMode from the active tab
       if (subPrompt) {
         promptText = subPrompt;
       } else if (tab.isPicMode) {
@@ -555,7 +564,7 @@ Alt + X         - ${text.closeTabDescription}
     }
 
     function startNano(filename) {
-      isNanoMode = true; // Nano still globally takes over the screen
+      isNanoMode = true;
       nanoFilename = filename || 'untitled.txt';
       nanoTextarea.value = '';
       nanoEditor.style.display = 'flex';
@@ -646,19 +655,17 @@ Alt + X         - ${text.closeTabDescription}
         reader.onload = (event) => {
           tab.picOriginalImageData = event.target.result;
           tab.picActiveImageData = event.target.result;
-          tab.isPicMode = true; // Use tab-local mode
+          tab.isPicMode = true;
           showImageAndMenu(tab, tab.picActiveImageData);
         };
         reader.readAsDataURL(file);
         e.target.value = '';
       };
 
-      // FIX: Use setTimeout to ensure the prompt is restored if the dialog is canceled.
-      // Reset the file input value just before opening the dialog to detect cancellation reliably
+      // Ensure prompt is restored on cancellation
       picFileInput.value = '';
       setTimeout(() => { picFileInput.click(); }, 100);
       setTimeout(() => {
-        // If no file was selected after a short delay, and the mode isn't active, assume cancellation and restore prompt
         if (!picFileInput.files.length && !tab.isPicMode) {
             createPrompt(tab);
         }
@@ -728,7 +735,7 @@ Alt + X         - ${text.closeTabDescription}
         const promptText = promptLine.querySelector('span:first-child').textContent;
         promptLine.innerHTML = `<span>${promptText}</span><span>${input}</span>\n`;
       }
-      const action = tab.picNextAction; // Use tab-local action
+      const action = tab.picNextAction;
       tab.picNextAction = null;
       switch (action) {
         case 'compress':
@@ -808,10 +815,18 @@ Alt + X         - ${text.closeTabDescription}
         // Prepend a blank line before media start info
         output('\n');
 
+        // RELEASE AUDIO CONTROL from any other tab
+        if (currentAudioTabId && currentAudioTabId !== tab.id) {
+            const oldTab = tabs.find(t => t.id === currentAudioTabId);
+            if(oldTab) oldTab.hasAudioControl = false;
+        }
+        currentAudioTabId = tab.id;
+
         // Check for common media types
         if (file.type.startsWith('audio/')) {
           audioPlayer.src = URL.createObjectURL(file);
           audioPlayer.play();
+          tab.hasAudioControl = true; // Take control
           output(`${text.playingSound} ${file.name}. ${text.usePauseStop}\n`);
         } else if (file.type.startsWith('video/')) {
           if (tab.videoElement) tab.videoElement.remove();
@@ -847,12 +862,10 @@ Alt + X         - ${text.closeTabDescription}
         createPrompt(tab);
       };
 
-      // FIX: Use setTimeout to ensure the prompt is restored if the dialog is canceled.
-      // Reset the file input value just before opening the dialog to detect cancellation reliably
+      // Ensure prompt is restored on cancellation
       mediaFileInput.value = '';
       setTimeout(() => { mediaFileInput.click(); }, 100);
       setTimeout(() => {
-        // If no file was selected after a short delay, assume cancellation and restore prompt
         if (!mediaFileInput.files.length) {
           createPrompt(tab);
         }
@@ -904,24 +917,40 @@ Alt + X         - ${text.closeTabDescription}
           startPicMode(tab);
           return;
         case 'play':
+          // If already playing audio, prompt to resume or ask for new file
+          if(currentAudioTabId === tab.id && audioPlayer.src && audioPlayer.paused) {
+             audioPlayer.play();
+             output(text.resumingSound);
+             break;
+          }
           startPlayMode(tab);
           return;
         case 'pause':
+          if (currentAudioTabId !== tab.id) {
+             output(text.audioControlError);
+             break;
+          }
           if (!audioPlayer.paused && audioPlayer.src) {
             audioPlayer.pause();
             output(text.soundPaused);
           } else {
-            output("No media currently playing.\n");
+            output("No audio currently playing in this tab's control.\n");
           }
           break;
         case 'stop':
+          if (currentAudioTabId !== tab.id) {
+             output(text.audioControlError);
+             break;
+          }
           if (audioPlayer.src) {
             audioPlayer.pause();
             audioPlayer.currentTime = 0;
-            audioPlayer.removeAttribute('src'); // Clear source
+            audioPlayer.removeAttribute('src');
+            tab.hasAudioControl = false;
+            currentAudioTabId = null; // Release control
             output(text.soundStopped);
           } else {
-            output("No media currently playing.\n");
+            output("No audio currently playing in this tab's control.\n");
           }
           break;
         case 'help':
