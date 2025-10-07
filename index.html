@@ -84,10 +84,6 @@
       font-weight: bold;
     }
 
-    #tabs-container .tab:last-of-type {
-      margin-right: auto;
-    }
-
     .new-tab-button:hover {
       background-color: var(--terminal-color);
       color: #000;
@@ -275,10 +271,11 @@
       resumingSound: "Resuming audio...\n",
       soundPaused: "Audio paused. Use 'play' to resume.\n",
       soundStopped: "Audio stopped.\n",
-      audioControlError: "Error: This tab does not have control of the audio player.\n", // NEW
+      audioControlError: "Error: This tab does not have control of the audio player.\n",
       calculatorError: "Invalid expression. Only numbers and operators (+, -, *, /, (, )) are allowed.\n",
-      colorChanged: "The color has been changed.\n",
+      colorChanged: "The color has been changed. Use 'theme reset' to revert.\n",
       colorReset: "The color has been reset.\n",
+      themeUsage: "Usage: theme [color] or 'theme reset'.\n",
       commandNotFound: "Command not found:",
       picCommandNotFound: "Unknown pic command. Try a number from the menu, 'save', 'reset', or 'exit'.\n",
       picSaving: "Saving image...\n",
@@ -313,9 +310,9 @@
     let audioCtx;
     let username = '';
     let awaitingUsername = true;
-    let isNanoMode = false; // Nano is globally modal (takes over screen)
+    let isNanoMode = false;
     let nanoFilename = '';
-    let currentAudioTabId = null; // NEW: Tracks which tab owns the audio player
+    let currentAudioTabId = null;
 
     const delay = ms => new Promise(res => setTimeout(res, ms));
 
@@ -451,7 +448,7 @@ Alt + X         - ${text.closeTabDescription}
         picOriginalImageData: null,
         picActiveImageData: null,
         picNextAction: null,
-        // NEW: AUDIO CONTROL STATE
+        // AUDIO CONTROL STATE
         hasAudioControl: false
       };
       tabs.push(newTab);
@@ -547,8 +544,16 @@ Alt + X         - ${text.closeTabDescription}
     }
 
     function createPrompt(tab, subPrompt = '') {
+      // Remove existing cursor before creating new prompt line
+      const oldCursor = tab.terminalElement.querySelector('.cursor');
+      if (oldCursor) oldCursor.remove();
+
       const promptLine = document.createElement('div');
       promptLine.className = 'prompt-line';
+      // Use a unique ID for the prompt line for reliable scrolling
+      const uniqueId = `prompt-line-${Date.now()}`;
+      promptLine.id = uniqueId;
+
       let promptText;
       if (subPrompt) {
         promptText = subPrompt;
@@ -561,7 +566,25 @@ Alt + X         - ${text.closeTabDescription}
       tab.terminalElement.appendChild(promptLine);
       tab.terminalElement.scrollTop = tab.terminalElement.scrollHeight;
       tab.currentCommand = '';
+
+      return promptLine; // Return the new prompt element
     }
+
+    function refocusTerminal(tab) {
+        // Find the most recent prompt-line
+        const lastPrompt = tab.terminalElement.querySelector('.prompt-line:last-child');
+        if (lastPrompt) {
+            // Ensure the cursor is placed on the active command line
+            const cursor = lastPrompt.querySelector('.cursor');
+            if (!cursor) {
+                lastPrompt.innerHTML += `<span class="cursor"></span>`;
+            }
+            // Use scrollIntoView for guaranteed focus
+            lastPrompt.scrollIntoView({ behavior: 'smooth', block: 'end' });
+        }
+        tab.terminalElement.focus();
+    }
+
 
     function startNano(filename) {
       isNanoMode = true;
@@ -838,16 +861,15 @@ Alt + X         - ${text.closeTabDescription}
           videoEl.controls = true;
           videoEl.autoplay = true;
 
-          const refocusTerminal = () => {
-            tab.terminalElement.focus();
-          };
+          const refocusTerminalCallback = () => { refocusTerminal(tab); };
+
           videoEl.onended = () => {
             tab.videoElement = null;
-            refocusTerminal();
+            refocusTerminalCallback();
           };
           videoEl.addEventListener('fullscreenchange', () => {
             if (!document.fullscreenElement) {
-              refocusTerminal();
+              refocusTerminalCallback();
             }
           });
 
@@ -859,7 +881,14 @@ Alt + X         - ${text.closeTabDescription}
         }
         e.target.value = '';
         output('\n'); // Append a blank line before the prompt
-        createPrompt(tab);
+
+        const newPrompt = createPrompt(tab); // Create the new prompt element
+
+        // FIX: Use scrollIntoView on the *new* prompt element for guaranteed scroll
+        setTimeout(() => {
+            newPrompt.scrollIntoView({ behavior: 'smooth', block: 'end' });
+            tab.terminalElement.focus();
+        }, 0);
       };
 
       // Ensure prompt is restored on cancellation
@@ -892,7 +921,9 @@ Alt + X         - ${text.closeTabDescription}
       };
 
       // Prepend a blank line for all command outputs for readability
-      output('\n');
+      if (cmd.toLowerCase() !== 'say') {
+          output('\n');
+      }
 
       if (cmd === "secret") {
         output(text.secretResponse);
@@ -900,29 +931,31 @@ Alt + X         - ${text.closeTabDescription}
         return;
       }
 
+      let skipFooter = false;
+
       switch (cmd.toLowerCase()) {
         case 'say':
           if (!arg) {
             output(text.sayUsage);
-            break;
-          }
-          if ('speechSynthesis' in window) {
+          } else if ('speechSynthesis' in window) {
             const utterance = new SpeechSynthesisUtterance(arg);
             window.speechSynthesis.speak(utterance);
           } else {
             output(text.sayError);
           }
+          skipFooter = true; // Say command skips the standard footer
           break;
         case 'pic':
           startPicMode(tab);
           return;
         case 'play':
-          // If already playing audio, prompt to resume or ask for new file
+          // If already playing audio AND this tab owns control, attempt to resume
           if(currentAudioTabId === tab.id && audioPlayer.src && audioPlayer.paused) {
              audioPlayer.play();
              output(text.resumingSound);
              break;
           }
+          // Otherwise, start file picker (which handles control hijacking)
           startPlayMode(tab);
           return;
         case 'pause':
@@ -964,7 +997,7 @@ Alt + X         - ${text.closeTabDescription}
             tab.videoElement.remove();
             tab.videoElement = null;
           }
-          // clear/cls does not need a blank line before the prompt
+          // clear/cls does not use the standard footer
           createPrompt(tab);
           return;
         case 'date':
@@ -994,6 +1027,9 @@ Alt + X         - ${text.closeTabDescription}
           } else if (arg) {
             document.documentElement.style.setProperty('--terminal-color', arg);
             output(text.colorChanged);
+          } else {
+            // Inform user about usage when no arguments are provided
+            output(text.themeUsage);
           }
           break;
         case 'nano':
@@ -1004,15 +1040,17 @@ Alt + X         - ${text.closeTabDescription}
           break;
       }
 
-      // Append a blank line before the prompt for all commands (except those that return early/clear the screen)
-      output('\n');
+      if (!skipFooter) {
+        // Append a blank line before the prompt for all commands
+        output('\n');
+      }
       createPrompt(tab);
     }
 
     document.body.addEventListener('keydown', async (e) => {
       const tab = getActiveTab();
 
-      if (isNanoMode) return; // Nano mode is still globally modal
+      if (isNanoMode) return;
 
       if (e.altKey) {
         if (e.key.toLowerCase() === 't' || e.key.toLowerCase() === 'x') {
@@ -1045,7 +1083,6 @@ Alt + X         - ${text.closeTabDescription}
 
       if (!tab || tab.isProcessing) return;
 
-      // Check for tab-local pic mode
       const isPicModeActive = tab.isPicMode;
       const picNextActionActive = tab.picNextAction;
 
@@ -1107,6 +1144,7 @@ Alt + X         - ${text.closeTabDescription}
               suggestionsDiv.textContent = matches.join('    ');
               suggestionsDiv.style.cssText = 'padding-left: 15px; padding-top: 5px; padding-bottom: 5px;';
               tab.terminalElement.insertBefore(suggestionsDiv, activePromptLine);
+              // Ensure we scroll down to see the suggestions
               tab.terminalElement.scrollTop = tab.terminalElement.scrollHeight;
             }
           } else if (parts.length >= 2) {
@@ -1151,8 +1189,12 @@ Alt + X         - ${text.closeTabDescription}
     });
 
     document.body.addEventListener('click', (e) => {
-      if (terminalFrame.contains(e.target) && !tabsContainer.contains(e.target)) {
-        getActiveTab()?.terminalElement.focus();
+      const tab = getActiveTab();
+      if (terminalFrame.contains(e.target) && !tabsContainer.contains(e.target) && tab) {
+        // Only refocus if we are not currently clicking on a video player
+        if (e.target.tagName.toLowerCase() !== 'video') {
+            tab.terminalElement.focus();
+        }
       }
     });
 
