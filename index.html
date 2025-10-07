@@ -312,12 +312,10 @@
     let audioCtx;
     let username = '';
     let awaitingUsername = true;
-    let isNanoMode = false;
-    let nanoFilename = '';
-    let isPicMode = false;
-    let picOriginalImageData = null;
-    let picActiveImageData = null;
-    let picNextAction = null;
+    let isNanoMode = false; // Still global as nano takes over the whole screen
+    let nanoFilename = ''; // Still global for nano filename
+
+    // REMOVED GLOBAL PIC MODE VARIABLES, NOW STORED IN TAB OBJECT
 
     const delay = ms => new Promise(res => setTimeout(res, ms));
 
@@ -448,6 +446,11 @@ Alt + X         - ${text.closeTabDescription}
         currentCommand: '',
         isProcessing: false,
         videoElement: null,
+        // NEW: ISOLATED PIC MODE VARIABLES
+        isPicMode: false,
+        picOriginalImageData: null,
+        picActiveImageData: null,
+        picNextAction: null
       };
       tabs.push(newTab);
       document.getElementById('tab-group').appendChild(tabEl);
@@ -537,9 +540,10 @@ Alt + X         - ${text.closeTabDescription}
       const promptLine = document.createElement('div');
       promptLine.className = 'prompt-line';
       let promptText;
+      // Access isPicMode from the active tab
       if (subPrompt) {
         promptText = subPrompt;
-      } else if (isPicMode) {
+      } else if (tab.isPicMode) {
         promptText = `pic>`;
       } else {
         promptText = `${username}@${config.hostname}:~$`;
@@ -551,7 +555,7 @@ Alt + X         - ${text.closeTabDescription}
     }
 
     function startNano(filename) {
-      isNanoMode = true;
+      isNanoMode = true; // Nano still globally takes over the screen
       nanoFilename = filename || 'untitled.txt';
       nanoTextarea.value = '';
       nanoEditor.style.display = 'flex';
@@ -635,26 +639,27 @@ Alt + X         - ${text.closeTabDescription}
       picFileInput.onchange = (e) => {
         const file = e.target.files[0];
         if (!file) {
-          // This path is for when the user selects and cancels a file quickly, though unreliable.
           createPrompt(tab);
           return;
         }
         const reader = new FileReader();
         reader.onload = (event) => {
-          picOriginalImageData = event.target.result;
-          picActiveImageData = event.target.result;
-          isPicMode = true;
-          showImageAndMenu(tab, picActiveImageData);
+          tab.picOriginalImageData = event.target.result;
+          tab.picActiveImageData = event.target.result;
+          tab.isPicMode = true; // Use tab-local mode
+          showImageAndMenu(tab, tab.picActiveImageData);
         };
         reader.readAsDataURL(file);
         e.target.value = '';
       };
 
       // FIX: Use setTimeout to ensure the prompt is restored if the dialog is canceled.
+      // Reset the file input value just before opening the dialog to detect cancellation reliably
+      picFileInput.value = '';
       setTimeout(() => { picFileInput.click(); }, 100);
       setTimeout(() => {
-        // If no file was selected after 200ms, assume cancellation and restore prompt
-        if (!picFileInput.files.length && !isPicMode) {
+        // If no file was selected after a short delay, and the mode isn't active, assume cancellation and restore prompt
+        if (!picFileInput.files.length && !tab.isPicMode) {
             createPrompt(tab);
         }
       }, 200);
@@ -723,17 +728,17 @@ Alt + X         - ${text.closeTabDescription}
         const promptText = promptLine.querySelector('span:first-child').textContent;
         promptLine.innerHTML = `<span>${promptText}</span><span>${input}</span>\n`;
       }
-      const action = picNextAction;
-      picNextAction = null;
+      const action = tab.picNextAction; // Use tab-local action
+      tab.picNextAction = null;
       switch (action) {
         case 'compress':
-          picActiveImageData = await applyCanvasFilter(picActiveImageData, 'compress', input);
+          tab.picActiveImageData = await applyCanvasFilter(tab.picActiveImageData, 'compress', input);
           break;
         case 'resize':
-          picActiveImageData = await applyCanvasFilter(picActiveImageData, 'resize', input);
+          tab.picActiveImageData = await applyCanvasFilter(tab.picActiveImageData, 'resize', input);
           break;
       }
-      showImageAndMenu(tab, picActiveImageData);
+      showImageAndMenu(tab, tab.picActiveImageData);
     }
 
     async function handlePicCommand(command, tab) {
@@ -747,38 +752,38 @@ Alt + X         - ${text.closeTabDescription}
       }
       switch (command.toLowerCase()) {
         case '1':
-          picNextAction = 'compress';
+          tab.picNextAction = 'compress';
           createPrompt(tab, text.picPromptQuality);
           return;
         case '2':
-          picNextAction = 'resize';
+          tab.picNextAction = 'resize';
           createPrompt(tab, text.picPromptWidth);
           return;
         case '3':
-          picActiveImageData = await applyCanvasFilter(picActiveImageData, 'grayscale');
-          showImageAndMenu(tab, picActiveImageData);
+          tab.picActiveImageData = await applyCanvasFilter(tab.picActiveImageData, 'grayscale');
+          showImageAndMenu(tab, tab.picActiveImageData);
           return;
         case '4':
-          picActiveImageData = await applyCanvasFilter(picActiveImageData, 'sepia');
-          showImageAndMenu(tab, picActiveImageData);
+          tab.picActiveImageData = await applyCanvasFilter(tab.picActiveImageData, 'sepia');
+          showImageAndMenu(tab, tab.picActiveImageData);
           return;
         case 'reset':
-          picActiveImageData = picOriginalImageData;
-          showImageAndMenu(tab, picActiveImageData);
+          tab.picActiveImageData = tab.picOriginalImageData;
+          showImageAndMenu(tab, tab.picActiveImageData);
           return;
         case 'save':
           output(text.picSaving);
           const a = document.createElement('a');
-          a.href = picActiveImageData;
+          a.href = tab.picActiveImageData;
           a.download = 'edited-image.jpg';
           a.click();
           break;
         case 'exit':
         case 'quit':
-          isPicMode = false;
-          picOriginalImageData = null;
-          picActiveImageData = null;
-          picNextAction = null;
+          tab.isPicMode = false;
+          tab.picOriginalImageData = null;
+          tab.picActiveImageData = null;
+          tab.picNextAction = null;
           output(text.leavingPicMode);
           break;
         default:
@@ -792,7 +797,6 @@ Alt + X         - ${text.closeTabDescription}
       mediaFileInput.onchange = (e) => {
         const file = e.target.files[0];
         if (!file) {
-          // This path is for when the user selects and cancels a file quickly, though unreliable.
           createPrompt(tab);
           return;
         }
@@ -844,11 +848,13 @@ Alt + X         - ${text.closeTabDescription}
       };
 
       // FIX: Use setTimeout to ensure the prompt is restored if the dialog is canceled.
+      // Reset the file input value just before opening the dialog to detect cancellation reliably
+      mediaFileInput.value = '';
       setTimeout(() => { mediaFileInput.click(); }, 100);
       setTimeout(() => {
-        // If no file was selected after 200ms, assume cancellation and restore prompt
+        // If no file was selected after a short delay, assume cancellation and restore prompt
         if (!mediaFileInput.files.length) {
-            createPrompt(tab);
+          createPrompt(tab);
         }
       }, 200);
     }
@@ -975,7 +981,10 @@ Alt + X         - ${text.closeTabDescription}
     }
 
     document.body.addEventListener('keydown', async (e) => {
-      if (isNanoMode) return;
+      const tab = getActiveTab();
+
+      if (isNanoMode) return; // Nano mode is still globally modal
+
       if (e.altKey) {
         if (e.key.toLowerCase() === 't' || e.key.toLowerCase() === 'x') {
           e.preventDefault();
@@ -1004,8 +1013,13 @@ Alt + X         - ${text.closeTabDescription}
         }
         return;
       }
-      const tab = getActiveTab();
+
       if (!tab || tab.isProcessing) return;
+
+      // Check for tab-local pic mode
+      const isPicModeActive = tab.isPicMode;
+      const picNextActionActive = tab.picNextAction;
+
       if (document.activeElement === tab.terminalElement) {
         e.preventDefault();
         const commandTextEl = tab.terminalElement.querySelector('.prompt-line:last-child .active-command-text');
@@ -1013,14 +1027,14 @@ Alt + X         - ${text.closeTabDescription}
         tab.currentCommand = commandTextEl.textContent;
         if (e.key === 'Enter') {
           playReturnSound();
-          if (tab.currentCommand.trim() && !isPicMode && !picNextAction) {
+          if (tab.currentCommand.trim() && !isPicModeActive && !picNextActionActive) {
             tab.commandHistory.push(tab.currentCommand);
           }
           tab.historyIndex = tab.commandHistory.length;
 
           tab.isProcessing = true;
-          if (isPicMode) {
-            if (picNextAction) {
+          if (isPicModeActive) {
+            if (picNextActionActive) {
               await handlePicSubCommand(tab.currentCommand, tab);
             } else {
               await handlePicCommand(tab.currentCommand, tab);
@@ -1033,13 +1047,13 @@ Alt + X         - ${text.closeTabDescription}
           tab.currentCommand = tab.currentCommand.slice(0, -1);
           commandTextEl.textContent = tab.currentCommand;
           playKeySound();
-        } else if (e.key === 'ArrowUp' && !isPicMode) {
+        } else if (e.key === 'ArrowUp' && !isPicModeActive) {
           if (tab.historyIndex > 0) {
             tab.historyIndex--;
             tab.currentCommand = tab.commandHistory[tab.historyIndex];
             commandTextEl.textContent = tab.currentCommand;
           }
-        } else if (e.key === 'ArrowDown' && !isPicMode) {
+        } else if (e.key === 'ArrowDown' && !isPicModeActive) {
           if (tab.historyIndex < tab.commandHistory.length) {
             tab.historyIndex++;
             if (tab.historyIndex < tab.commandHistory.length) {
