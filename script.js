@@ -92,6 +92,7 @@ function appendToTerminal(tab, htmlContent) {
 }
 
 function createPrompt(tab, subPrompt = '') {
+    if (!tab) return;
     const oldCursor = tab.terminalElement.querySelector('.cursor');
     if (oldCursor) oldCursor.remove();
 
@@ -321,9 +322,11 @@ function readNanoFile() {
 }
 
 function startPicMode(tab) {
+    let fileSelected = false;
+
     const handleCancel = () => {
         setTimeout(() => {
-            if (picFileInput.value === '') {
+            if (!fileSelected) {
                 createPrompt(tab);
                 refocusTerminal(tab);
             }
@@ -333,6 +336,7 @@ function startPicMode(tab) {
     window.addEventListener('focus', handleCancel, { once: true });
 
     picFileInput.onchange = (e) => {
+        fileSelected = true;
         window.removeEventListener('focus', handleCancel);
 
         const file = e.target.files[0];
@@ -408,6 +412,12 @@ async function applyCanvasFilter(imageData, filter, value) {
 }
 
 async function handlePicSubCommand(input, tab) {
+    const command = input.toLowerCase();
+    if (command === 'exit' || command === 'quit') {
+        await handlePicCommand('exit', tab);
+        return;
+    }
+
     const lastPromptLine = tab.terminalElement.querySelector('.prompt-line:last-child');
     if (lastPromptLine) {
         const promptText = lastPromptLine.querySelector('span:first-child').textContent;
@@ -475,36 +485,30 @@ async function handlePicCommand(command, tab) {
 }
 
 function startPlayMode(tab) {
-    // This function will run if the window regains focus (i.e., dialog is closed)
+    let fileSelected = false;
+
     const handleCancel = () => {
-        // We use a small timeout to allow the 'onchange' event to fire first if a file was selected.
         setTimeout(() => {
-            // If the input is still empty, the user must have canceled.
-            if (mediaFileInput.value === '') {
+            if (!fileSelected) {
                 createPrompt(tab);
                 refocusTerminal(tab);
             }
         }, 200);
     };
 
-    // Listen for the focus event ONCE.
     window.addEventListener('focus', handleCancel, { once: true });
 
     mediaFileInput.onchange = (e) => {
-        // IMPORTANT: If a file IS selected, we must remove the focus listener
-        // to prevent it from creating a second prompt.
+        fileSelected = true;
         window.removeEventListener('focus', handleCancel);
         
         const file = e.target.files[0];
-        // The original logic continues here...
-        if (!file) { // This now serves as a fallback.
+        if (!file) {
             createPrompt(tab); 
             return;
         }
 
-        if (state.currentAudioTabId && state.currentAudioTabId !== tab.id) {
-            // Logic to handle audio control switching can be added here
-        }
+        if (state.currentAudioTabId && state.currentAudioTabId !== tab.id) {}
         state.currentAudioTabId = tab.id;
         
         if (audioPlayer.src) URL.revokeObjectURL(audioPlayer.src);
@@ -547,7 +551,7 @@ function startPlayMode(tab) {
         refocusTerminal(tab);
     };
 
-    mediaFileInput.value = ''; // Reset the input value
+    mediaFileInput.value = '';
     mediaFileInput.click();
 }
 
@@ -563,6 +567,7 @@ const commandHandlers = {
     'cls': (tab) => {
         playClearSound();
         if (tab.videoElement) {
+            tab.videoElement.pause();
             URL.revokeObjectURL(tab.videoElement.src);
             tab.videoElement.remove();
             tab.videoElement = null;
@@ -602,6 +607,7 @@ const commandHandlers = {
         if (state.currentAudioTabId === tab.id && audioPlayer.src && audioPlayer.paused) {
             audioPlayer.play();
             appendToTerminal(tab, "<span>Resuming audio...</span>\n");
+            createPrompt(tab);
         } else {
             startPlayMode(tab);
         }
@@ -610,6 +616,7 @@ const commandHandlers = {
         if (state.currentAudioTabId !== tab.id) { appendToTerminal(tab, "<span>Error: This tab does not control the audio.</span>\n"); } 
         else if (!audioPlayer.paused && audioPlayer.src) { audioPlayer.pause(); appendToTerminal(tab, "<span>Audio paused.</span>\n"); } 
         else { appendToTerminal(tab, "<span>No audio is playing.</span>\n"); }
+        createPrompt(tab);
     },
     'stop': (tab) => {
         if (state.currentAudioTabId !== tab.id) { appendToTerminal(tab, "<span>Error: This tab does not control the audio.</span>\n"); } 
@@ -621,6 +628,7 @@ const commandHandlers = {
             state.currentAudioTabId = null;
             appendToTerminal(tab, "<span>Audio stopped.</span>\n");
         } else { appendToTerminal(tab, "<span>No audio is playing.</span>\n"); }
+        createPrompt(tab);
     },
     'secret': (tab) => {
         appendToTerminal(tab, `<span>${text.secretResponse}</span>`);
@@ -647,7 +655,7 @@ async function handleCommand(tab, commandStr) {
     if (handler) {
         if (['nano', 'pic', 'play'].includes(cmd.toLowerCase())) {
              handler(tab, joinedArgs);
-             return; // These handlers manage their own prompts.
+             return;
         }
         appendToTerminal(tab, '\n');
         handler(tab, joinedArgs);
