@@ -321,9 +321,25 @@ function readNanoFile() {
 }
 
 function startPicMode(tab) {
+    const handleCancel = () => {
+        setTimeout(() => {
+            if (picFileInput.value === '') {
+                createPrompt(tab);
+                refocusTerminal(tab);
+            }
+        }, 200);
+    };
+
+    window.addEventListener('focus', handleCancel, { once: true });
+
     picFileInput.onchange = (e) => {
+        window.removeEventListener('focus', handleCancel);
+
         const file = e.target.files[0];
-        if (!file) { createPrompt(tab); return; }
+        if (!file) { 
+            createPrompt(tab);
+            return;
+        }
         const reader = new FileReader();
         reader.onload = (event) => {
             tab.picOriginalImageData = event.target.result;
@@ -334,6 +350,7 @@ function startPicMode(tab) {
         reader.readAsDataURL(file);
         e.target.value = '';
     };
+    
     picFileInput.value = '';
     picFileInput.click();
 }
@@ -458,9 +475,32 @@ async function handlePicCommand(command, tab) {
 }
 
 function startPlayMode(tab) {
+    // This function will run if the window regains focus (i.e., dialog is closed)
+    const handleCancel = () => {
+        // We use a small timeout to allow the 'onchange' event to fire first if a file was selected.
+        setTimeout(() => {
+            // If the input is still empty, the user must have canceled.
+            if (mediaFileInput.value === '') {
+                createPrompt(tab);
+                refocusTerminal(tab);
+            }
+        }, 200);
+    };
+
+    // Listen for the focus event ONCE.
+    window.addEventListener('focus', handleCancel, { once: true });
+
     mediaFileInput.onchange = (e) => {
+        // IMPORTANT: If a file IS selected, we must remove the focus listener
+        // to prevent it from creating a second prompt.
+        window.removeEventListener('focus', handleCancel);
+        
         const file = e.target.files[0];
-        if (!file) { createPrompt(tab); return; }
+        // The original logic continues here...
+        if (!file) { // This now serves as a fallback.
+            createPrompt(tab); 
+            return;
+        }
 
         if (state.currentAudioTabId && state.currentAudioTabId !== tab.id) {
             // Logic to handle audio control switching can be added here
@@ -506,7 +546,8 @@ function startPlayMode(tab) {
         createPrompt(tab);
         refocusTerminal(tab);
     };
-    mediaFileInput.value = '';
+
+    mediaFileInput.value = ''; // Reset the input value
     mediaFileInput.click();
 }
 
@@ -604,9 +645,9 @@ async function handleCommand(tab, commandStr) {
     const joinedArgs = args.join(' ');
 
     if (handler) {
-        if (['nano', 'pic', 'play'].includes(cmd.toLowerCase()) && !joinedArgs) {
+        if (['nano', 'pic', 'play'].includes(cmd.toLowerCase())) {
              handler(tab, joinedArgs);
-             return;
+             return; // These handlers manage their own prompts.
         }
         appendToTerminal(tab, '\n');
         handler(tab, joinedArgs);
