@@ -103,7 +103,7 @@ function createPrompt(tab, subPrompt = '') {
     } else {
         promptText = `${state.username}@${config.hostname}:~$`;
     }
-
+    
     const promptHTML = `<div class="prompt-line"><span>${promptText} </span><span class="active-command-text"></span><span class="cursor"></span></div>`;
     appendToTerminal(tab, promptHTML);
     tab.currentCommand = '';
@@ -135,12 +135,12 @@ function playSound(type, freq, gainVal, duration) {
     const gainNode = state.audioCtx.createGain();
     oscillator.connect(gainNode);
     gainNode.connect(state.audioCtx.destination);
-
+    
     oscillator.type = type;
     oscillator.frequency.setValueAtTime(freq, state.audioCtx.currentTime);
     gainNode.gain.setValueAtTime(gainVal, state.audioCtx.currentTime);
     gainNode.gain.exponentialRampToValueAtTime(0.00001, state.audioCtx.currentTime + duration);
-
+    
     oscillator.start(state.audioCtx.currentTime);
     oscillator.stop(state.audioCtx.currentTime + duration);
 }
@@ -225,13 +225,13 @@ function closeTab(tabId) {
 
 function createNewTab() {
     if (state.tabs.length >= config.maxTabs) return;
-
+    
     const tabId = `tab-${state.nextTabId++}`;
     const tabEl = document.createElement('div');
     tabEl.className = 'tab';
     tabEl.dataset.tabId = tabId;
     tabEl.innerHTML = `<span>Terminal ${state.tabs.length + 1}</span>`;
-
+    
     if (state.tabs.length > 0) {
         const closeButton = document.createElement('span');
         closeButton.className = 'tab-close';
@@ -239,27 +239,27 @@ function createNewTab() {
         closeButton.onclick = (e) => { e.stopPropagation(); closeTab(tabId); };
         tabEl.appendChild(closeButton);
     }
-
+    
     tabEl.onclick = () => switchTab(tabId);
-
+    
     const terminalEl = document.createElement('div');
     terminalEl.className = 'terminal';
     terminalEl.id = tabId;
     terminalEl.tabIndex = -1;
-
+    
     const newTab = {
         id: tabId, tabElement: tabEl, terminalElement: terminalEl,
         commandHistory: [], historyIndex: -1, currentCommand: '',
         isProcessing: false, videoElement: null, isPicMode: false,
         picOriginalImageData: null, picActiveImageData: null, picNextAction: null
     };
-
+    
     state.tabs.push(newTab);
     document.getElementById('tab-group').appendChild(tabEl);
     terminalWindowsContainer.appendChild(terminalEl);
     updateNewTabButton();
     switchTab(tabId);
-
+    
     if (state.tabs.length > 1) {
         newTab.isProcessing = true;
         createPrompt(newTab);
@@ -269,7 +269,250 @@ function createNewTab() {
 }
 
 // ===================================================================================
-// COMMAND HANDLING & FEATURES
+// FEATURE-SPECIFIC FUNCTIONS (NANO, PIC, PLAY)
+// ===================================================================================
+
+function startNano(filename) {
+    state.isNanoMode = true;
+    state.nanoFilename = filename || 'untitled.txt';
+    nanoTextarea.value = '';
+    nanoEditor.style.display = 'flex';
+    nanoTextarea.focus();
+}
+
+function closeNano() {
+    state.isNanoMode = false;
+    nanoTextarea.value = '';
+    state.nanoFilename = '';
+    nanoEditor.style.display = 'none';
+    const activeTab = getActiveTab();
+    if (activeTab) {
+        refocusTerminal(activeTab);
+        createPrompt(activeTab);
+    }
+}
+
+function saveNanoFile() {
+    const content = nanoTextarea.value;
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = state.nanoFilename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
+function readNanoFile() {
+    nanoFileInput.onchange = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            nanoTextarea.value += event.target.result;
+            nanoTextarea.focus();
+        };
+        reader.readAsText(file);
+        e.target.value = '';
+    };
+    nanoFileInput.click();
+}
+
+function startPicMode(tab) {
+    picFileInput.onchange = (e) => {
+        const file = e.target.files[0];
+        if (!file) { createPrompt(tab); return; }
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            tab.picOriginalImageData = event.target.result;
+            tab.picActiveImageData = event.target.result;
+            tab.isPicMode = true;
+            showImageAndMenu(tab, tab.picActiveImageData);
+        };
+        reader.readAsDataURL(file);
+        e.target.value = '';
+    };
+    picFileInput.value = '';
+    picFileInput.click();
+}
+
+function showImageAndMenu(tab, imageData) {
+    const image = document.createElement('img');
+    image.src = imageData;
+    image.className = 'terminal-image';
+    image.onload = () => { tab.terminalElement.scrollTop = tab.terminalElement.scrollHeight; };
+    const menu = document.createElement('span');
+    menu.textContent = "\n[1] Compress  [2] Resize  [3] Grayscale  [4] Sepia  |  [save] Save  [reset] Reset  [exit] Exit\n";
+    tab.terminalElement.appendChild(image);
+    tab.terminalElement.appendChild(menu);
+    createPrompt(tab);
+}
+
+async function applyCanvasFilter(imageData, filter, value) {
+    return new Promise(resolve => {
+        const image = new Image();
+        image.onload = () => {
+            const canvas = document.createElement('canvas');
+            let quality = 0.92;
+            if (filter === 'resize') {
+                const aspectRatio = image.height / image.width;
+                canvas.width = parseInt(value, 10);
+                canvas.height = canvas.width * aspectRatio;
+            } else {
+                canvas.width = image.width;
+                canvas.height = image.height;
+            }
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+            if (filter === 'grayscale' || filter === 'sepia') {
+                const pixelData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                const data = pixelData.data;
+                for (let i = 0; i < data.length; i += 4) {
+                    const r = data[i], g = data[i + 1], b = data[i + 2];
+                    if (filter === 'grayscale') {
+                        const avg = (r + g + b) / 3;
+                        data[i] = data[i + 1] = data[i + 2] = avg;
+                    } else if (filter === 'sepia') {
+                        data[i] = Math.min(255, r * 0.393 + g * 0.769 + b * 0.189);
+                        data[i + 1] = Math.min(255, r * 0.349 + g * 0.686 + b * 0.168);
+                        data[i + 2] = Math.min(255, r * 0.272 + g * 0.534 + b * 0.131);
+                    }
+                }
+                ctx.putImageData(pixelData, 0, 0);
+            } else if (filter === 'compress') {
+                quality = parseInt(value, 10) / 100;
+            }
+            resolve(canvas.toDataURL('image/jpeg', quality));
+        };
+        image.src = imageData;
+    });
+}
+
+async function handlePicSubCommand(input, tab) {
+    const lastPromptLine = tab.terminalElement.querySelector('.prompt-line:last-child');
+    if (lastPromptLine) {
+        const promptText = lastPromptLine.querySelector('span:first-child').textContent;
+        lastPromptLine.innerHTML = `<span>${promptText}</span><span>${input}</span>\n`;
+    }
+    const action = tab.picNextAction;
+    tab.picNextAction = null;
+    switch (action) {
+        case 'compress':
+            tab.picActiveImageData = await applyCanvasFilter(tab.picActiveImageData, 'compress', input);
+            break;
+        case 'resize':
+            tab.picActiveImageData = await applyCanvasFilter(tab.picActiveImageData, 'resize', input);
+            break;
+    }
+    showImageAndMenu(tab, tab.picActiveImageData);
+}
+
+async function handlePicCommand(command, tab) {
+    const lastPromptLine = tab.terminalElement.querySelector('.prompt-line:last-child');
+    if (lastPromptLine) {
+        lastPromptLine.innerHTML = `<span>pic> </span><span>${command}</span>\n`;
+    }
+    switch (command.toLowerCase()) {
+        case '1':
+            tab.picNextAction = 'compress';
+            createPrompt(tab, "Quality (1-100): ");
+            return;
+        case '2':
+            tab.picNextAction = 'resize';
+            createPrompt(tab, "New width (pixels): ");
+            return;
+        case '3':
+            tab.picActiveImageData = await applyCanvasFilter(tab.picActiveImageData, 'grayscale');
+            showImageAndMenu(tab, tab.picActiveImageData);
+            return;
+        case '4':
+            tab.picActiveImageData = await applyCanvasFilter(tab.picActiveImageData, 'sepia');
+            showImageAndMenu(tab, tab.picActiveImageData);
+            return;
+        case 'reset':
+            tab.picActiveImageData = tab.picOriginalImageData;
+            showImageAndMenu(tab, tab.picActiveImageData);
+            return;
+        case 'save':
+            appendToTerminal(tab, "<span>Saving image...</span>\n");
+            const a = document.createElement('a');
+            a.href = tab.picActiveImageData;
+            a.download = 'edited-image.jpg';
+            a.click();
+            break;
+        case 'exit':
+        case 'quit':
+            tab.isPicMode = false;
+            tab.picOriginalImageData = null;
+            tab.picActiveImageData = null;
+            tab.picNextAction = null;
+            appendToTerminal(tab, "<span>Leaving image editor...</span>\n");
+            break;
+        default:
+            appendToTerminal(tab, "<span>Unknown pic command.</span>\n");
+            break;
+    }
+    createPrompt(tab);
+}
+
+function startPlayMode(tab) {
+    mediaFileInput.onchange = (e) => {
+        const file = e.target.files[0];
+        if (!file) { createPrompt(tab); return; }
+
+        if (state.currentAudioTabId && state.currentAudioTabId !== tab.id) {
+            // Logic to handle audio control switching can be added here
+        }
+        state.currentAudioTabId = tab.id;
+        
+        if (audioPlayer.src) URL.revokeObjectURL(audioPlayer.src);
+
+        if (file.type.startsWith('audio/')) {
+            audioPlayer.src = URL.createObjectURL(file);
+            audioPlayer.play();
+            appendToTerminal(tab, `\n<span>Playing ${file.name}. Use 'pause' or 'stop'.</span>\n\n`);
+        } else if (file.type.startsWith('video/')) {
+            if (tab.videoElement) {
+                URL.revokeObjectURL(tab.videoElement.src);
+                tab.videoElement.remove();
+            }
+            appendToTerminal(tab, `\n<span>Now playing: ${file.name}</span>`);
+            const videoEl = document.createElement('video');
+            videoEl.className = 'terminal-video';
+            videoEl.src = URL.createObjectURL(file);
+            videoEl.controls = true;
+            videoEl.autoplay = true;
+            
+            videoEl.addEventListener('pause', () => refocusTerminal(tab));
+            videoEl.addEventListener('play', () => refocusTerminal(tab));
+            videoEl.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement) refocusTerminal(tab); });
+
+            videoEl.onended = () => {
+                URL.revokeObjectURL(videoEl.src);
+                videoEl.remove();
+                tab.videoElement = null;
+                refocusTerminal(tab);
+            };
+            
+            tab.terminalElement.appendChild(videoEl);
+            tab.videoElement = videoEl;
+        } else {
+            appendToTerminal(tab, `\n<span>Error: File type of '${file.name}' is not supported.</span>\n\n`);
+        }
+        
+        e.target.value = '';
+        createPrompt(tab);
+        refocusTerminal(tab);
+    };
+    mediaFileInput.value = '';
+    mediaFileInput.click();
+}
+
+
+// ===================================================================================
+// COMMAND DISPATCHER
 // ===================================================================================
 
 const commandHandlers = {
@@ -284,7 +527,6 @@ const commandHandlers = {
             tab.videoElement = null;
         }
         tab.terminalElement.innerHTML = '';
-        createPrompt(tab);
     },
     'clear': (tab) => commandHandlers.cls(tab), // Alias
     'date': (tab) => {
@@ -296,9 +538,7 @@ const commandHandlers = {
     },
     'theme': (tab, arg) => {
         const availableThemes = ['amber', 'sky', 'rose'];
-        // Remove any existing theme classes
         tab.terminalElement.classList.remove(...availableThemes.map(t => `theme-${t}`));
-
         if (arg === 'reset') {
             appendToTerminal(tab, "<span>Color theme reset.</span>");
         } else if (availableThemes.includes(arg)) {
@@ -308,57 +548,38 @@ const commandHandlers = {
             appendToTerminal(tab, `<span>Usage: theme [color] or 'reset'. Available: ${availableThemes.join(', ')}</span>`);
         }
     },
-    'nano': (tab, arg) => {
-        startNano(arg);
-    },
-    'pic': (tab) => {
-        startPicMode(tab);
-    },
+    'nano': (tab, arg) => startNano(arg),
+    'pic': (tab) => startPicMode(tab),
     'say': (tab, arg) => {
-        if (!arg) {
-            appendToTerminal(tab, "<span>Usage: say [text]</span>");
-        } else if ('speechSynthesis' in window) {
+        if (!arg) { appendToTerminal(tab, "<span>Usage: say [text]</span>"); } 
+        else if ('speechSynthesis' in window) {
             const utterance = new SpeechSynthesisUtterance(arg);
             window.speechSynthesis.speak(utterance);
-        } else {
-            appendToTerminal(tab, "<span>Error: Text-to-speech not supported.</span>");
-        }
-        createPrompt(tab); // 'say' is instant, so re-prompt immediately
+        } else { appendToTerminal(tab, "<span>Error: Text-to-speech not supported.</span>"); }
     },
     'play': (tab) => {
         if (state.currentAudioTabId === tab.id && audioPlayer.src && audioPlayer.paused) {
             audioPlayer.play();
             appendToTerminal(tab, "<span>Resuming audio...</span>\n");
-            createPrompt(tab);
         } else {
             startPlayMode(tab);
         }
     },
     'pause': (tab) => {
-        if (state.currentAudioTabId !== tab.id) {
-            appendToTerminal(tab, "<span>Error: This tab does not control the audio.</span>\n");
-        } else if (!audioPlayer.paused && audioPlayer.src) {
-            audioPlayer.pause();
-            appendToTerminal(tab, "<span>Audio paused.</span>\n");
-        } else {
-            appendToTerminal(tab, "<span>No audio is playing.</span>\n");
-        }
-        createPrompt(tab);
+        if (state.currentAudioTabId !== tab.id) { appendToTerminal(tab, "<span>Error: This tab does not control the audio.</span>\n"); } 
+        else if (!audioPlayer.paused && audioPlayer.src) { audioPlayer.pause(); appendToTerminal(tab, "<span>Audio paused.</span>\n"); } 
+        else { appendToTerminal(tab, "<span>No audio is playing.</span>\n"); }
     },
     'stop': (tab) => {
-        if (state.currentAudioTabId !== tab.id) {
-             appendToTerminal(tab, "<span>Error: This tab does not control the audio.</span>\n");
-        } else if (audioPlayer.src) {
+        if (state.currentAudioTabId !== tab.id) { appendToTerminal(tab, "<span>Error: This tab does not control the audio.</span>\n"); } 
+        else if (audioPlayer.src) {
             audioPlayer.pause();
             audioPlayer.currentTime = 0;
             URL.revokeObjectURL(audioPlayer.src);
             audioPlayer.removeAttribute('src');
             state.currentAudioTabId = null;
             appendToTerminal(tab, "<span>Audio stopped.</span>\n");
-        } else {
-            appendToTerminal(tab, "<span>No audio is playing.</span>\n");
-        }
-        createPrompt(tab);
+        } else { appendToTerminal(tab, "<span>No audio is playing.</span>\n"); }
     },
     'secret': (tab) => {
         appendToTerminal(tab, `<span>${text.secretResponse}</span>`);
@@ -378,97 +599,33 @@ async function handleCommand(tab, commandStr) {
         createPrompt(tab);
         return;
     }
-
+    
     const handler = commandHandlers[cmd.toLowerCase()];
+    const joinedArgs = args.join(' ');
 
     if (handler) {
-        // Special cases that don't auto-add a newline or re-prompt
-        if (['nano', 'pic', 'play'].includes(cmd.toLowerCase())) {
-             handler(tab, args.join(' '));
+        if (['nano', 'pic', 'play'].includes(cmd.toLowerCase()) && !joinedArgs) {
+             handler(tab, joinedArgs);
              return;
         }
         appendToTerminal(tab, '\n');
-        handler(tab, args.join(' '));
+        handler(tab, joinedArgs);
     } else if (config.apps[cmd.toLowerCase()]) {
         appendToTerminal(tab, `\n<span>Opening '${cmd}'...</span>\n`);
         window.open(config.apps[cmd.toLowerCase()], '_blank');
     } else {
         appendToTerminal(tab, `\n<span>${text.commandNotFound} ${cmd}</span>\n`);
     }
-
-    // Most commands will re-prompt automatically unless handled inside the handler.
-    if (!['say', 'cls', 'pause', 'stop'].includes(cmd.toLowerCase())) {
-         createPrompt(tab);
-    }
+    
+    createPrompt(tab);
 }
-
-function startPlayMode(tab) {
-    mediaFileInput.onchange = (e) => {
-        const file = e.target.files[0];
-        if (!file) { createPrompt(tab); return; }
-
-        if (state.currentAudioTabId && state.currentAudioTabId !== tab.id) {
-            const oldTab = state.tabs.find(t => t.id === state.currentAudioTabId);
-        }
-        state.currentAudioTabId = tab.id;
-
-        URL.revokeObjectURL(audioPlayer.src); // Revoke previous audio
-
-        if (file.type.startsWith('audio/')) {
-            audioPlayer.src = URL.createObjectURL(file);
-            audioPlayer.play();
-            appendToTerminal(tab, `\n<span>Playing ${file.name}. Use 'pause' or 'stop'.</span>\n\n`);
-        } else if (file.type.startsWith('video/')) {
-            if (tab.videoElement) {
-                URL.revokeObjectURL(tab.videoElement.src);
-                tab.videoElement.remove();
-            }
-            appendToTerminal(tab, `\n<span>Now playing: ${file.name}</span>`);
-            const videoEl = document.createElement('video');
-            videoEl.className = 'terminal-video';
-            videoEl.src = URL.createObjectURL(file);
-            videoEl.controls = true;
-            videoEl.autoplay = true;
-
-            // *** FOCUS FIX IMPLEMENTED HERE ***
-            videoEl.addEventListener('pause', () => refocusTerminal(tab));
-            videoEl.addEventListener('play', () => refocusTerminal(tab));
-            videoEl.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement) refocusTerminal(tab); });
-
-            videoEl.onended = () => {
-                URL.revokeObjectURL(videoEl.src);
-                videoEl.remove();
-                tab.videoElement = null;
-                refocusTerminal(tab);
-            };
-
-            tab.terminalElement.appendChild(videoEl);
-            tab.videoElement = videoEl;
-        } else {
-            appendToTerminal(tab, `\n<span>Error: File type of '${file.name}' is not supported.</span>\n\n`);
-        }
-
-        e.target.value = '';
-        createPrompt(tab);
-        refocusTerminal(tab);
-    };
-    mediaFileInput.value = '';
-    mediaFileInput.click();
-}
-
-// NOTE: Nano and Pic functionality can be further modularized, but are kept here for simplicity.
-// The code for startNano, closeNano, startPicMode, handlePicCommand, etc., remains largely
-// the same as your original, as it was already well-contained. For brevity in this refactor,
-// I'll omit pasting them again, but they should be included here in the final script.
-
-// [IMAGINE THE NANO AND PIC FUNCTIONS FROM YOUR ORIGINAL CODE ARE PASTED HERE]
-// I have omitted them to keep the response from being excessively long, as they had no major errors.
 
 // ===================================================================================
 // EVENT LISTENERS & INITIALIZATION
 // ===================================================================================
 
 document.body.addEventListener('keydown', async (e) => {
+    const tab = getActiveTab();
     if (state.isNanoMode) return;
 
     if (e.altKey) {
@@ -477,9 +634,6 @@ document.body.addEventListener('keydown', async (e) => {
         else if (e.key.toLowerCase() === 'x' && state.activeTabId) closeTab(state.activeTabId);
         return;
     }
-
-    const tab = getActiveTab();
-    if (!tab || tab.isProcessing) return;
 
     if (state.awaitingUsername) {
         e.preventDefault();
@@ -500,62 +654,75 @@ document.body.addEventListener('keydown', async (e) => {
         return;
     }
 
+    if (!tab || tab.isProcessing) return;
+
     if (document.activeElement === tab.terminalElement) {
         e.preventDefault();
         const commandTextEl = tab.terminalElement.querySelector('.prompt-line:last-child .active-command-text');
         if (!commandTextEl) return;
-
+        
         tab.currentCommand = commandTextEl.textContent;
 
-        switch (e.key) {
-            case 'Enter':
-                playReturnSound();
-                if (tab.currentCommand.trim() && !tab.isPicMode) {
-                    tab.commandHistory.push(tab.currentCommand);
-                }
-                tab.historyIndex = tab.commandHistory.length;
-                tab.isProcessing = true;
-                await handleCommand(tab, tab.currentCommand);
-                tab.isProcessing = false;
-                break;
-            case 'Backspace':
-                tab.currentCommand = tab.currentCommand.slice(0, -1);
+        if (e.key === 'Enter') {
+            playReturnSound();
+            const commandToProcess = tab.currentCommand;
+            if (commandToProcess.trim() && !tab.isPicMode && !tab.picNextAction) {
+                tab.commandHistory.push(commandToProcess);
+            }
+            tab.historyIndex = tab.commandHistory.length;
+            tab.isProcessing = true;
+            
+            if (tab.isPicMode) {
+                if (tab.picNextAction) { await handlePicSubCommand(commandToProcess, tab); }
+                else { await handlePicCommand(commandToProcess, tab); }
+            } else {
+                await handleCommand(tab, commandToProcess);
+            }
+            tab.isProcessing = false;
+        } else if (e.key === 'Backspace') {
+            tab.currentCommand = tab.currentCommand.slice(0, -1);
+            commandTextEl.textContent = tab.currentCommand;
+            playKeySound();
+        } else if (e.key === 'ArrowUp' && !tab.isPicMode) {
+            if (tab.historyIndex > 0) {
+                tab.historyIndex--;
+                tab.currentCommand = tab.commandHistory[tab.historyIndex];
                 commandTextEl.textContent = tab.currentCommand;
-                playKeySound();
-                break;
-            case 'ArrowUp':
-                if (tab.historyIndex > 0) {
-                    tab.historyIndex--;
-                    tab.currentCommand = tab.commandHistory[tab.historyIndex];
-                    commandTextEl.textContent = tab.currentCommand;
-                }
-                break;
-            case 'ArrowDown':
-                if (tab.historyIndex < tab.commandHistory.length) {
-                    tab.historyIndex++;
-                    tab.currentCommand = tab.historyIndex < tab.commandHistory.length ? tab.commandHistory[tab.historyIndex] : '';
-                    commandTextEl.textContent = tab.currentCommand;
-                }
-                break;
-            case 'Tab':
-                const fragment = tab.currentCommand.split(' ').pop().toLowerCase();
-                const matches = commandList.filter(cmd => cmd.startsWith(fragment));
-                if (matches.length === 1) {
-                    tab.currentCommand = tab.currentCommand.substring(0, tab.currentCommand.lastIndexOf(fragment)) + matches[0] + ' ';
-                    commandTextEl.textContent = tab.currentCommand;
-                } else if (matches.length > 1) {
-                    const suggestionsHTML = `<pre>\n${matches.join('   ')}</pre>`;
-                    commandTextEl.parentElement.insertAdjacentHTML('beforebegin', suggestionsHTML);
-                    tab.terminalElement.scrollTop = tab.terminalElement.scrollHeight;
-                }
-                break;
-            default:
-                if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
-                    tab.currentCommand += e.key;
-                    commandTextEl.textContent = tab.currentCommand;
-                    playKeySound();
-                }
-                break;
+            }
+        } else if (e.key === 'ArrowDown' && !tab.isPicMode) {
+            if (tab.historyIndex < tab.commandHistory.length) {
+                tab.historyIndex++;
+                tab.currentCommand = tab.historyIndex < tab.commandHistory.length ? tab.commandHistory[tab.historyIndex] : '';
+                commandTextEl.textContent = tab.currentCommand;
+            }
+        } else if (e.key === 'Tab') {
+            const fragment = tab.currentCommand.split(' ').pop().toLowerCase();
+            const matches = commandList.filter(cmd => cmd.startsWith(fragment));
+            if (matches.length === 1) {
+                tab.currentCommand = tab.currentCommand.substring(0, tab.currentCommand.lastIndexOf(fragment)) + matches[0] + ' ';
+                commandTextEl.textContent = tab.currentCommand;
+            } else if (matches.length > 1) {
+                const suggestionsHTML = `<pre>\n${matches.join('   ')}</pre>`;
+                commandTextEl.parentElement.insertAdjacentHTML('beforebegin', suggestionsHTML);
+                tab.terminalElement.scrollTop = tab.terminalElement.scrollHeight;
+            }
+        } else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+            tab.currentCommand += e.key;
+            commandTextEl.textContent = tab.currentCommand;
+            playKeySound();
+        }
+    }
+});
+
+nanoTextarea.addEventListener('keydown', (e) => {
+    if (!state.isNanoMode) return;
+    if (e.ctrlKey) {
+        const key = e.key.toLowerCase();
+        if (['x', 'o', 'r'].includes(key)) {
+            e.preventDefault();
+            if (key === 'x') closeNano();
+            else if (key === 'o') saveNanoFile();
+            else if (key === 'r') readNanoFile();
         }
     }
 });
